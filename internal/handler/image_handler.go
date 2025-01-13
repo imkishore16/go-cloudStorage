@@ -1,95 +1,99 @@
 package handler
 
 import (
-	"fmt"
-	"log"
+	"encoding/json"
 	"net/http"
 
-	"github.com/gin-gonic/gin"
-	"github.com/imkishore16/go-cloudStorage/internal/model"
 	"github.com/imkishore16/go-cloudStorage/internal/model/apperrors"
+	"github.com/imkishore16/go-cloudStorage/internal/service"
 )
 
-// DeleteImage handler
-func (h *Handler) DeleteImage(c *gin.Context) {
-	authUser := c.MustGet("user").(*model.User)
-
-	ctx := c.Request.Context()
-	err := h.UserService.ClearProfileImage(ctx, authUser.UID)
-
-	if err != nil {
-		log.Printf("Failed to delete profile image: %v\n", err.Error())
-
-		c.JSON(apperrors.Status(err), gin.H{
-			"error": err,
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message": "success",
-	})
+type ImageHandler interface {
+	UpdateImage(w http.ResponseWriter, r *http.Request)
+	DeleteImage(w http.ResponseWriter, r *http.Request)
+	GetImage(w http.ResponseWriter, r *http.Request)
 }
 
-// Image handler
-func (h *Handler) Image(c *gin.Context) {
-	authUser := c.MustGet("user").(*model.User)
+type imageHandler struct {
+	ImageService service.ImageService
+}
 
-	// limit overly large request bodies
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, h.MaxBodyBytes)
+// NewImageHandler initializes an ImageHandler
+func NewImageHandler(imageService service.ImageService) ImageHandler {
+	return &imageHandler{
+		ImageService: imageService,
+	}
+}
 
-	imageFileHeader, err := c.FormFile("imageFile")
-
-	// check for error before checking for non-nil header
+// UpdateImage handles the upload or update of an image
+func (h *imageHandler) UpdateImage(w http.ResponseWriter, r *http.Request) {
+	file, header, err := r.FormFile("image")
 	if err != nil {
-		// should be a validation error
-		log.Printf("Unable parse multipart/form-data: %+v", err)
-
-		if err.Error() == "http: request body too large" {
-			c.JSON(http.StatusRequestEntityTooLarge, gin.H{
-				"error": fmt.Sprintf("Max request body size is %v bytes\n", h.MaxBodyBytes),
-			})
-			return
-		}
-		e := apperrors.NewBadRequest("Unable to parse multipart/form-data")
-		c.JSON(e.Status(), gin.H{
-			"error": e,
-		})
+		respondError(w, apperrors.NewBadRequest("invalid file upload"))
 		return
 	}
+	defer file.Close()
 
-	if imageFileHeader == nil {
-		e := apperrors.NewBadRequest("Must include an imageFile")
-		c.JSON(e.Status(), gin.H{
-			"error": e,
-		})
-		return
-	}
-
-	mimeType := imageFileHeader.Header.Get("Content-Type")
-
-	// Validate image mime-type is allowable
-	if valid := isAllowedImageType(mimeType); !valid {
-		log.Println("Image is not an allowable mime-type")
-		e := apperrors.NewBadRequest("imageFile must be 'image/jpeg' or 'image/png'")
-		c.JSON(e.Status(), gin.H{
-			"error": e,
-		})
-		return
-	}
-
-	ctx := c.Request.Context()
-
-	updatedUser, err := h.UserService.SetProfileImage(ctx, authUser.UID, imageFileHeader)
+	imageURL, err := h.ImageService.UpdateImage(r.Context(), file, header.Filename)
 	if err != nil {
-		c.JSON(apperrors.Status(err), gin.H{
-			"error": err,
-		})
+		respondError(w, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"imageUrl": updatedUser.ImageURL,
-		"message":  "success",
-	})
+	respondJSON(w, http.StatusOK, map[string]string{"imageURL": imageURL})
+}
+
+// DeleteImage handles the deletion of an image
+func (h *imageHandler) DeleteImage(w http.ResponseWriter, r *http.Request) {
+	imageURL := r.URL.Query().Get("imageURL")
+	if imageURL == "" {
+		respondError(w, apperrors.NewBadRequest("imageURL query parameter is required"))
+		return
+	}
+
+	err := h.ImageService.DeleteImage(r.Context(), imageURL)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]string{"message": "image deleted successfully"})
+}
+
+// GetImage handles retrieval of an image URL
+func (h *imageHandler) GetImage(w http.ResponseWriter, r *http.Request) {
+	imageURL := r.URL.Query().Get("imageURL")
+	if imageURL == "" {
+		respondError(w, apperrors.NewBadRequest("imageURL query parameter is required"))
+		return
+	}
+
+	url, err := h.ImageService.GetImage(r.Context(), imageURL)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]string{"imageURL": url})
+}
+
+// Utility Functions
+
+func respondJSON(w http.ResponseWriter, status int, payload interface{}) {
+	response, err := json.Marshal(payload)
+	if err != nil {
+		http.Error(w, "failed to encode JSON response", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	w.Write(response)
+}
+
+func respondError(w http.ResponseWriter, err error) {
+	if appErr, ok := err.(*apperrors.Error); ok {
+		respondJSON(w, appErr.Status(), map[string]string{"error": appErr.Message})
+	} else {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+	}
 }

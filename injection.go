@@ -1,11 +1,8 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"os"
-	"strconv"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/imkishore16/go-cloudStorage/internal/handler"
@@ -23,18 +20,14 @@ func inject(d *dataSources) (*gin.Engine, error) {
 	/*
 	 * repository layer
 	 */
-	userRepository := repository.NewUserRepository(d.DB)
-	// tokenRepository := repository.NewTokenRepository(d.RedisClient)
 	bucketName := os.Getenv("GC_IMAGE_BUCKET")
 	imageRepository := repository.NewImageRepository(d.StorageClient, bucketName)
 
 	/*
 	 * service layer
 	 */
-	userService := service.NewUserService(&service.USConfig{
-		UserRepository:  userRepository,
-		ImageRepository: imageRepository,
-	})
+
+	imageService := service.NewImageService(imageRepository)
 
 	// load rsa keys
 	// privKeyFile := os.Getenv("PRIV_KEY_FILE")
@@ -93,29 +86,30 @@ func inject(d *dataSources) (*gin.Engine, error) {
 	router := gin.Default()
 
 	// read in ACCOUNT_API_URL
-	baseURL := os.Getenv("ACCOUNT_API_URL")
+	// baseURL := os.Getenv("ACCOUNT_API_URL")
 
-	// read in HANDLER_TIMEOUT
-	handlerTimeout := os.Getenv("HANDLER_TIMEOUT")
-	ht, err := strconv.ParseInt(handlerTimeout, 0, 64)
-	if err != nil {
-		return nil, fmt.Errorf("could not parse HANDLER_TIMEOUT as int: %w", err)
-	}
+	// // read in HANDLER_TIMEOUT
+	// handlerTimeout := os.Getenv("HANDLER_TIMEOUT")
+	// ht, err := strconv.ParseInt(handlerTimeout, 0, 64)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("could not parse HANDLER_TIMEOUT as int: %w", err)
+	// }
 
-	maxBodyBytes := os.Getenv("MAX_BODY_BYTES")
-	mbb, err := strconv.ParseInt(maxBodyBytes, 0, 64)
-	if err != nil {
-		return nil, fmt.Errorf("could not parse MAX_BODY_BYTES as int: %w", err)
-	}
+	// maxBodyBytes := os.Getenv("MAX_BODY_BYTES")
+	// mbb, err := strconv.ParseInt(maxBodyBytes, 0, 64)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("could not parse MAX_BODY_BYTES as int: %w", err)
+	// }
 
-	handler.NewHandler(&handler.Config{
-		R:           router,
-		UserService: userService,
-		// TokenService:    tokenService,
-		BaseURL:         baseURL,
-		TimeoutDuration: time.Duration(time.Duration(ht) * time.Second),
-		MaxBodyBytes:    mbb,
-	})
+	// handler.NewImageHandler(&handler.Config{
+	// 	// R:            router,
+	// 	ImageService: imageService,
+	// 	// BaseURL:      baseURL,
+	// 	// TimeoutDuration: time.Duration(ht) * time.Second,
+	// 	// MaxBodyBytes:    mbb,
+	// })
+
+	handler.NewImageHandler(imageService)
 
 	return router, nil
 }

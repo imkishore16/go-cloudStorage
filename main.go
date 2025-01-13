@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -11,6 +12,7 @@ import (
 )
 
 func main() {
+	fmt.Println("Starting server...")
 	log.Println("Starting server...")
 
 	// initialize data sources
@@ -31,7 +33,6 @@ func main() {
 		Handler: router,
 	}
 
-	// Graceful server shutdown - https://github.com/gin-gonic/examples/blob/master/graceful-shutdown/graceful-shutdown/server.go
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to initialize server: %v\n", err)
