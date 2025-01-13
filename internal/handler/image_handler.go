@@ -1,99 +1,117 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
+	"os"
 
-	"github.com/imkishore16/go-cloudStorage/internal/model/apperrors"
+	"github.com/gin-gonic/gin"
 	"github.com/imkishore16/go-cloudStorage/internal/service"
 )
 
-type ImageHandler interface {
-	UpdateImage(w http.ResponseWriter, r *http.Request)
-	DeleteImage(w http.ResponseWriter, r *http.Request)
-	GetImage(w http.ResponseWriter, r *http.Request)
+type ImageHandler struct {
+	imageService service.ImageService
 }
 
-type imageHandler struct {
-	ImageService service.ImageService
-}
-
-// NewImageHandler initializes an ImageHandler
-func NewImageHandler(imageService service.ImageService) ImageHandler {
-	return &imageHandler{
-		ImageService: imageService,
+func NewImageHandler(imageService service.ImageService) *ImageHandler {
+	return &ImageHandler{
+		imageService: imageService,
 	}
 }
 
-// UpdateImage handles the upload or update of an image
-func (h *imageHandler) UpdateImage(w http.ResponseWriter, r *http.Request) {
-	file, header, err := r.FormFile("image")
+func (h *ImageHandler) GetImage(c *gin.Context) {
+	objName := c.Param("objName")
+
+	localFilePath, err := h.imageService.GetImage(c.Request.Context(), objName)
 	if err != nil {
-		respondError(w, apperrors.NewBadRequest("invalid file upload"))
-		return
-	}
-	defer file.Close()
-
-	imageURL, err := h.ImageService.UpdateImage(r.Context(), file, header.Filename)
-	if err != nil {
-		respondError(w, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]string{"imageURL": imageURL})
+	c.JSON(http.StatusOK, gin.H{
+		"message":       "Image retrieved successfully",
+		"localFilePath": localFilePath,
+	})
 }
 
-// DeleteImage handles the deletion of an image
-func (h *imageHandler) DeleteImage(w http.ResponseWriter, r *http.Request) {
-	imageURL := r.URL.Query().Get("imageURL")
-	if imageURL == "" {
-		respondError(w, apperrors.NewBadRequest("imageURL query parameter is required"))
-		return
-	}
+func (h *ImageHandler) PostImage(c *gin.Context) {
+	objectKey := c.PostForm("objectKey")
 
-	err := h.ImageService.DeleteImage(r.Context(), imageURL)
+	// Retrieve the uploaded file
+	file, err := c.FormFile("file")
 	if err != nil {
-		respondError(w, err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read file"})
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]string{"message": "image deleted successfully"})
+	// Save the file temporarily
+	tempFilePath := "./temp/" + file.Filename
+	if err := c.SaveUploadedFile(file, tempFilePath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save uploaded file"})
+		return
+	}
+
+	defer func() {
+		// Clean up the temporary file
+		_ = os.Remove(tempFilePath)
+	}()
+
+	// Call the service to upload the file
+	url, err := h.imageService.PostImage(c.Request.Context(), tempFilePath, objectKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Image uploaded successfully",
+		"url":     url,
+	})
 }
 
-// GetImage handles retrieval of an image URL
-func (h *imageHandler) GetImage(w http.ResponseWriter, r *http.Request) {
-	imageURL := r.URL.Query().Get("imageURL")
-	if imageURL == "" {
-		respondError(w, apperrors.NewBadRequest("imageURL query parameter is required"))
-		return
-	}
+func (h *ImageHandler) UpdateImage(c *gin.Context) {
+	objectKey := c.PostForm("objectKey")
 
-	url, err := h.ImageService.GetImage(r.Context(), imageURL)
+	// Retrieve the uploaded file
+	file, err := c.FormFile("file")
 	if err != nil {
-		respondError(w, err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read file"})
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]string{"imageURL": url})
+	// Save the file temporarily
+	tempFilePath := "./temp/" + file.Filename
+	if err := c.SaveUploadedFile(file, tempFilePath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save uploaded file"})
+		return
+	}
+
+	defer func() {
+		// Clean up the temporary file
+		_ = os.Remove(tempFilePath)
+	}()
+
+	url, err := h.imageService.UpdateImage(c.Request.Context(), tempFilePath, objectKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Image updated successfully",
+		"url":     url,
+	})
 }
 
-// Utility Functions
+func (h *ImageHandler) DeleteImage(c *gin.Context) {
+	objName := c.Param("objName")
 
-func respondJSON(w http.ResponseWriter, status int, payload interface{}) {
-	response, err := json.Marshal(payload)
+	err := h.imageService.DeleteImage(c.Request.Context(), objName)
 	if err != nil {
-		http.Error(w, "failed to encode JSON response", http.StatusInternalServerError)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	w.Write(response)
-}
 
-func respondError(w http.ResponseWriter, err error) {
-	if appErr, ok := err.(*apperrors.Error); ok {
-		respondJSON(w, appErr.Status(), map[string]string{"error": appErr.Message})
-	} else {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-	}
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Image deleted successfully",
+	})
 }
