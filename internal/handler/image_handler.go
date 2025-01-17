@@ -19,9 +19,9 @@ func NewImageHandler(imageService service.ImageService) *ImageHandler {
 }
 
 func (h *ImageHandler) GetImage(c *gin.Context) {
-	objName := c.Param("objName")
+	objectKey := c.Param("id")
 
-	localFilePath, err := h.imageService.GetImage(c.Request.Context(), objName)
+	localFilePath, contentType, err := h.imageService.GetImage(c.Request.Context(), objectKey)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -30,38 +30,32 @@ func (h *ImageHandler) GetImage(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message":       "Image retrieved successfully",
 		"localFilePath": localFilePath,
+		"contentType":   contentType,
 	})
 }
 
 func (h *ImageHandler) PostImage(c *gin.Context) {
-	objectKey := c.PostForm("objectKey")
+	type ImageUploadRequest struct {
+		ObjectKey string `json:"objectKey" binding:"required"`
+		FilePath  string `json:"filePath" binding:"required"`
+	}
 
-	// Retrieve the uploaded file
-	file, err := c.FormFile("file")
+	var req ImageUploadRequest
+
+	// Parse JSON payload
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload: " + err.Error()})
+		return
+	}
+
+	// Call the service to upload the file using the provided filePath and objectKey
+	url, err := h.imageService.PostImage(c.Request.Context(), req.FilePath, req.ObjectKey)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read file"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload image: " + err.Error()})
 		return
 	}
 
-	// Save the file temporarily
-	tempFilePath := "./temp/" + file.Filename
-	if err := c.SaveUploadedFile(file, tempFilePath); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save uploaded file"})
-		return
-	}
-
-	defer func() {
-		// Clean up the temporary file
-		_ = os.Remove(tempFilePath)
-	}()
-
-	// Call the service to upload the file
-	url, err := h.imageService.PostImage(c.Request.Context(), tempFilePath, objectKey)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
+	// Respond with the uploaded file URL
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Image uploaded successfully",
 		"url":     url,

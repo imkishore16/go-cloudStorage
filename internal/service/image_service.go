@@ -9,7 +9,7 @@ import (
 
 // ImageService defines the interface for image operations
 type ImageService interface {
-	GetImage(ctx context.Context, objName string) (string, error)
+	GetImage(ctx context.Context, objName string) ([]byte, string, error)
 	PostImage(ctx context.Context, filePath string, objectKey string) (string, error)
 	UpdateImage(ctx context.Context, filePath string, objectKey string) (string, error)
 	DeleteImage(ctx context.Context, objName string) error
@@ -28,12 +28,12 @@ func NewImageService(imageRepo repository.ImageRepository) ImageService {
 }
 
 // GetImage retrieves an image from the bucket
-func (s *imageService) GetImage(ctx context.Context, objName string) (string, error) {
-	localFilePath, err := s.imageRepo.GetImage(ctx, objName)
+func (s *imageService) GetImage(ctx context.Context, objectKey string) ([]byte, string, error) {
+	localFilePath, contentType, err := s.imageRepo.GetImage(ctx, objectKey)
 	if err != nil {
-		return "", fmt.Errorf("error in GetImage: %w", err)
+		return nil, "", fmt.Errorf("error in GetImage: %w", err)
 	}
-	return localFilePath, nil
+	return localFilePath, contentType, nil
 }
 
 // PostImage uploads a new image to the bucket
